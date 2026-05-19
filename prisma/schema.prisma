@@ -1,0 +1,265 @@
+// De Groeiende Boom — datamodel
+// SQLite voor dev, switch naar postgresql voor productie
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// (Enum blocks zijn weggelaten — SQLite ondersteunt geen Prisma enums.
+//  De modellen gebruiken gewoon String velden voor role / level / status.)
+
+// ----- Models -----
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         String   // "STUDENT" | "TEACHER"
+  className    String?  // bv. "O&O 3A"
+  birthYear    Int?
+  createdAt    DateTime @default(now())
+
+  // Relations
+  tree           Tree?
+  selfScores     SelfScore[]
+  evidence       Evidence[]
+  peerRequestsAsTarget PeerRequest[] @relation("PeerRequestTarget")
+  peerRequestsAsPeer   PeerRequest[] @relation("PeerRequestPeer")
+  peerScoresGiven PeerScore[]    @relation("PeerScoreGiver")
+  reviewedEvidence Evidence[]    @relation("EvidenceReviewer")
+  achievements    LevelAchievement[]
+  notesAuthored   TeacherNote[]  @relation("NoteAuthor")
+  notesReceived   TeacherNote[]  @relation("NoteTarget")
+  userBadges      UserBadge[]
+  assignmentsAsStudent CompetenceAssignment[] @relation("AssignmentStudent")
+  assignmentsAuthored  CompetenceAssignment[] @relation("AssignmentAuthor")
+  dismissedTips     DismissedTip[]
+  passwordResetTokens PasswordResetToken[]
+  lastLoginAt   DateTime?
+  onboardedAt   DateTime?
+  tipsAuthored  Tip[]          @relation("TipAuthor")
+  helpRequests  HelpRequest[]
+}
+
+model Tree {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  xpTotal      Int      @default(0)
+  streakDays   Int      @default(0)
+  lastActiveAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+}
+
+model Competence {
+  slug        String   @id // bv. "samenwerken"
+  name        String
+  icon        String   // emoji
+  description String
+  orderIndex  Int      @unique
+
+  indicators  Indicator[]
+  selfScores  SelfScore[]
+  peerScores  PeerScore[]
+  achievements LevelAchievement[]
+  tips        Tip[]
+  evidenceLinks EvidenceLink[] // direct evidence-to-competence for convenience
+  assignments CompetenceAssignment[]
+}
+
+model Indicator {
+  id            String     @id @default(cuid())
+  competenceSlug String
+  competence    Competence @relation(fields: [competenceSlug], references: [slug], onDelete: Cascade)
+  level         String     // "BASIS" | "GEVORDERD" | "EXPERT"
+  text          String
+  orderIndex    Int
+
+  evidenceLinks EvidenceLink[]
+}
+
+model SelfScore {
+  id            String     @id @default(cuid())
+  userId        String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  competenceSlug String
+  competence    Competence @relation(fields: [competenceSlug], references: [slug])
+  answers       String     // JSON-encoded answers array
+  calculatedLevel String   // "BASIS" | "GEVORDERD" | "EXPERT"
+  createdAt     DateTime   @default(now())
+}
+
+model PeerRequest {
+  id            String   @id @default(cuid())
+  targetUserId  String
+  target        User     @relation("PeerRequestTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  peerUserId    String
+  peer          User     @relation("PeerRequestPeer", fields: [peerUserId], references: [id], onDelete: Cascade)
+  competenceSlug String
+  message       String?
+  status        String   @default("OPEN") // OPEN | COMPLETED | DECLINED
+  createdAt     DateTime @default(now())
+
+  peerScore     PeerScore?
+}
+
+model PeerScore {
+  id            String      @id @default(cuid())
+  requestId     String      @unique
+  request       PeerRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  peerUserId    String
+  peer          User        @relation("PeerScoreGiver", fields: [peerUserId], references: [id])
+  competenceSlug String
+  competence    Competence  @relation(fields: [competenceSlug], references: [slug])
+  answers       String      // JSON-encoded
+  comment       String?
+  createdAt     DateTime    @default(now())
+}
+
+model Evidence {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileUrl       String?  // null if reflection-only
+  fileType      String?  // "image" | "video" | "pdf" | "doc" | "link"
+  linkUrl       String?  // for "link" type
+  reflection    String
+  status        String   @default("INGEDIEND") // CONCEPT | INGEDIEND | GOEDGEKEURD | AFGEWEZEN
+  reviewerId    String?
+  reviewer      User?    @relation("EvidenceReviewer", fields: [reviewerId], references: [id])
+  reviewerNote  String?
+  reviewedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  links         EvidenceLink[]
+}
+
+model EvidenceLink {
+  id          String   @id @default(cuid())
+  evidenceId  String
+  evidence    Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  indicatorId String
+  indicator   Indicator @relation(fields: [indicatorId], references: [id], onDelete: Cascade)
+  competenceSlug String
+  competence  Competence @relation(fields: [competenceSlug], references: [slug])
+
+  @@unique([evidenceId, indicatorId])
+}
+
+model LevelAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  competenceSlug String
+  competence    Competence @relation(fields: [competenceSlug], references: [slug])
+  level         String   // BASIS | GEVORDERD | EXPERT
+  achievedAt    DateTime @default(now())
+  approvedById  String?
+
+  @@unique([userId, competenceSlug, level])
+}
+
+model Tip {
+  id                String     @id @default(cuid())
+  competenceSlug    String
+  competence        Competence @relation(fields: [competenceSlug], references: [slug], onDelete: Cascade)
+  level             String     // BASIS | GEVORDERD | EXPERT
+  type              String     // TIP | OPDRACHT | CHALLENGE
+  text              String
+  suggestedEvidence String?    // wat voor bewijs zou hierbij passen
+  createdById       String?    // null = uit seed, anders = teacher die de tip toevoegde
+  createdBy         User?      @relation("TipAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime   @default(now())
+
+  dismissedBy       DismissedTip[]
+}
+
+model DismissedTip {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tipId       String
+  tip         Tip      @relation(fields: [tipId], references: [id], onDelete: Cascade)
+  dismissedAt DateTime @default(now())
+
+  @@unique([userId, tipId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model TeacherNote {
+  id        String   @id @default(cuid())
+  authorId  String
+  author    User     @relation("NoteAuthor", fields: [authorId], references: [id])
+  targetId  String
+  target    User     @relation("NoteTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  text      String
+  createdAt DateTime @default(now())
+}
+
+model Badge {
+  slug      String   @id
+  name      String
+  icon      String
+  description String
+
+  userBadges UserBadge[]
+}
+
+model UserBadge {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badgeSlug   String
+  badge       Badge    @relation(fields: [badgeSlug], references: [slug])
+  earnedAt    DateTime @default(now())
+  notifiedAt  DateTime?
+
+  @@unique([userId, badgeSlug])
+}
+
+model HelpRequest {
+  id           String   @id @default(cuid())
+  userId       String?  // null als ingelogde sessie verloren ging
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fromName     String
+  fromEmail    String
+  fromRole     String?  // role op moment van verzoek (snapshot)
+  message      String
+  status       String   @default("OPEN") // OPEN | IN_PROGRESS | RESOLVED
+  resolvedAt   DateTime?
+  resolvedBy   String?
+  createdAt    DateTime @default(now())
+}
+
+model CompetenceAssignment {
+  id             String   @id @default(cuid())
+  competenceSlug String
+  competence     Competence @relation(fields: [competenceSlug], references: [slug])
+  // Eén van deze twee is ingevuld (XOR enforced in app-laag):
+  studentId      String?  // assignment voor één leerling
+  student        User?    @relation("AssignmentStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  className      String?  // assignment voor hele klas (alle leerlingen met deze className)
+  targetLevel    String?  // optioneel streefniveau: BASIS | GEVORDERD | EXPERT
+  dueDate        DateTime?
+  message        String?
+  assignedById   String
+  assignedBy     User     @relation("AssignmentAuthor", fields: [assignedById], references: [id])
+  createdAt      DateTime @default(now())
+}
