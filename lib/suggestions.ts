@@ -48,7 +48,7 @@ export async function getSuggestionsForStudent(
     // Skip if al bewezen op streefniveau of hoger
     if (branch?.currentLevel === "EXPERT") continue;
     if (a.targetLevel === "BASIS" && branch?.currentLevel) continue;
-    if (a.targetLevel === "GEVORDERD" && (branch?.currentLevel === "GEVORDERD" || branch?.currentLevel === "EXPERT")) continue;
+    if (a.targetLevel === "GEVORDERD" && branch?.currentLevel === "GEVORDERD") continue;
 
     const tips = await prisma.tip.findMany({
       where: {
